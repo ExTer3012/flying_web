@@ -3,8 +3,8 @@ const router = express.Router();
 const Aeroport = require('../models/Aeroport');
 const auth = require('../middleware/auth');
 
-// GET
-router.get('/', async (req, res) => {
+// GET (protégé)
+router.get('/', auth, async (req, res) => {
   try {
     const aeroports = await Aeroport.find();
     res.json(aeroports);
@@ -13,8 +13,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET by ID
-router.get('/:id', async (req, res) => {
+// GET by ID (protégé)
+router.get('/:id', auth, async (req, res) => {
   try {
     const aeroport = await Aeroport.findById(req.params.id);
     if (!aeroport) return res.status(404).json({ message: 'Aéroport non trouvé' });

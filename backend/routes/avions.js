@@ -3,8 +3,8 @@ const router = express.Router();
 const Avion = require('../models/Avion');
 const auth = require('../middleware/auth');
 
-// GET
-router.get('/', async (req, res) => {
+// GET (protégé)
+router.get('/', auth, async (req, res) => {
   try {
     const avions = await Avion.find();
     res.json(avions);
@@ -13,8 +13,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET by ID
-router.get('/:id', async (req, res) => {
+// GET by ID (protégé)
+router.get('/:id', auth, async (req, res) => {
   try {
     const avion = await Avion.findById(req.params.id);
     if (!avion) return res.status(404).json({ message: 'Avion non trouvé' });

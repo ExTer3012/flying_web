@@ -39,8 +39,22 @@ const router = createRouter({
 
 // Guard pour les routes admin
 router.beforeEach((to, from, next) => {
-  if (to.meta.requiresAuth && !localStorage.getItem('token')) {
-    next('/admin/login')
+  const token = localStorage.getItem('token')
+  
+  if (to.path === '/admin/login' && token) {
+    // Si on essaie d'aller sur login alors qu'on est déjà connecté
+    next('/admin/dashboard')
+    return
+  }
+
+  if (to.meta.requiresAuth) {
+    if (!token) {
+      // Sauvegarder la route initialement demandée
+      localStorage.setItem('redirectAfterLogin', to.fullPath)
+      next('/admin/login')
+    } else {
+      next()
+    }
   } else {
     next()
   }

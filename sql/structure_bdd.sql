@@ -7,18 +7,32 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS modeles_avions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    modele VARCHAR(50) NOT NULL UNIQUE,
+    capacite INT NOT NULL,
+    dimension DECIMAL(5,2) NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS avions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     modele VARCHAR(50) NOT NULL,
     identification VARCHAR(50) NOT NULL UNIQUE,
-    nombre_places INT NOT NULL,
-    dimension DECIMAL(5,2) NOT NULL
+    FOREIGN KEY (modele) REFERENCES modeles_avions(modele)
 );
 
 CREATE TABLE IF NOT EXISTS aeroports (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ville VARCHAR(100) NOT NULL,
-    longueur_max DECIMAL(5,2) NOT NULL
+    nombre_pistes INT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS pistes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    aeroport_id INT NOT NULL,
+    numero_piste VARCHAR(10) NOT NULL,
+    longueur DECIMAL(5,2) NOT NULL,
+    FOREIGN KEY (aeroport_id) REFERENCES aeroports(id)
 );
 
 CREATE TABLE IF NOT EXISTS vols (

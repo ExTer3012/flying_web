@@ -35,9 +35,9 @@
     </div>
 
     <div v-else-if="vols.length > 0">
-      <h4 class="mb-3">{{ vols.length }} vol(s) trouvé(s)</h4>
+      <h4 class="mb-3">{{ volsDisponibles.length }} vol(s) trouvé(s)</h4>
       <div class="row g-3">
-        <div class="col-md-6" v-for="vol in vols" :key="vol._id">
+        <div class="col-md-6" v-for="vol in volsDisponibles" :key="vol._id">
           <div class="card h-100 shadow-sm">
             <div class="card-body">
               <h5 class="card-title">
@@ -61,12 +61,28 @@
                   <i class="bi bi-airplane me-1"></i>{{ vol.avion_id.modele }}
                 </small>
               </div>
-              <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-3">
                 <span :class="'badge ' + getStatutClass(vol.statut)">{{ vol.statut }}</span>
+                <span class="badge bg-info">
+                  <i class="bi bi-person me-1"></i>
+                  {{ vol.places_disponibles }} places disponibles
+                </span>
               </div>
-              <router-link :to="'/reservation/' + vol._id" class="btn btn-primary w-100">
+              <router-link v-if="vol.statut === 'planifie' && vol.places_disponibles > 0"
+                          :to="'/reservation/' + vol._id" 
+                          class="btn btn-primary w-100">
                 Réserver ce vol
               </router-link>
+              <button v-else-if="vol.statut !== 'planifie'"
+                      class="btn btn-secondary w-100" 
+                      disabled>
+                Vol non disponible
+              </button>
+              <button v-else
+                      class="btn btn-secondary w-100" 
+                      disabled>
+                Vol complet
+              </button>
             </div>
           </div>
         </div>
@@ -94,6 +110,16 @@ export default {
       vols: [],
       loading: false,
       searched: false
+    }
+  },
+  computed: {
+    volsDisponibles() {
+      return this.vols.filter(vol => {
+        // Uniquement les vols planifiés et dont la date de départ est future
+        const maintenant = new Date()
+        const dateDepart = new Date(vol.date_depart_utc)
+        return vol.statut === 'planifie' && dateDepart > maintenant
+      }).sort((a, b) => new Date(a.date_depart_utc) - new Date(b.date_depart_utc))
     }
   },
   methods: {

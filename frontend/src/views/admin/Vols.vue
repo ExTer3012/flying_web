@@ -24,7 +24,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="vol in vols" :key="vol._id">
+          <tr v-for="vol in volsAVenir" :key="vol._id">
             <td>{{ vol.numero_vol }}</td>
             <td>{{ vol.aeroport_depart_id?.ville }}</td>
             <td>{{ vol.aeroport_arrivee_id?.ville }}</td>
@@ -33,30 +33,41 @@
               <span :class="'badge ' + getStatutClass(vol.statut)">{{ vol.statut }}</span>
             </td>
             <td>
-              <button v-if="vol.statut === 'planifie'" class="btn btn-sm btn-success me-1" 
-                      @click="decoller(vol._id)">
-                Décoller
-              </button>
-              <button v-if="vol.statut === 'en_vol'" class="btn btn-sm btn-info me-1" 
-                      @click="atterrir(vol._id)">
-                Atterrir
-              </button>
-              <button class="btn btn-sm btn-danger" @click="annulerVol(vol._id)">
-                Annuler
-              </button>
+              <div class="btn-group">
+                <button class="btn btn-sm btn-primary me-1" 
+                        @click="voirPassagers(vol)">
+                  <i class="bi bi-people"></i>
+                </button>
+                <button v-if="vol.statut === 'planifie'" class="btn btn-sm btn-warning me-1" 
+                        @click="modifierVol(vol)">
+                  <i class="bi bi-pencil"></i>
+                </button>
+                <button v-if="vol.statut === 'planifie'" class="btn btn-sm btn-success me-1" 
+                        @click="decoller(vol._id)">
+                  Décoller
+                </button>
+                <button v-if="vol.statut === 'en_vol'" class="btn btn-sm btn-info me-1" 
+                        @click="atterrir(vol._id)">
+                  Atterrir
+                </button>
+                <button v-if="vol.statut === 'planifie'" class="btn btn-sm btn-danger" 
+                        @click="annulerVol(vol._id)">
+                  Annuler
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- Modal Ajout -->
-    <div v-if="showModal" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5)">
+    <!-- Modal Ajout/Modification -->
+    <div v-if="showModal || showEditModal" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5)">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Planifier un vol</h5>
-            <button type="button" class="btn-close" @click="showModal = false"></button>
+            <h5 class="modal-title">{{ showEditModal ? 'Modifier le vol' : 'Planifier un vol' }}</h5>
+            <button type="button" class="btn-close" @click="fermerModal"></button>
           </div>
           <div class="modal-body">
             <form @submit.prevent="ajouterVol">
@@ -95,8 +106,54 @@
                 <label class="form-label">Date/Heure arrivée (UTC)</label>
                 <input type="datetime-local" class="form-control" v-model="nouveauVol.date_arrivee_utc" required>
               </div>
-              <button type="submit" class="btn btn-primary">Planifier</button>
+              <button type="submit" class="btn btn-primary">
+                {{ showEditModal ? 'Enregistrer les modifications' : 'Planifier' }}
+              </button>
             </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Passagers -->
+    <div v-if="showPassagersModal" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5)">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              Passagers du vol {{ volSelectionne?.numero_vol }}
+              <span class="badge bg-secondary ms-2">
+                {{ passagersVol.length }} passager(s)
+              </span>
+            </h5>
+            <button type="button" class="btn-close" @click="showPassagersModal = false"></button>
+          </div>
+          <div class="modal-body">
+            <div v-if="passagersVol.length === 0" class="alert alert-info">
+              <i class="bi bi-info-circle me-2"></i>Aucun passager sur ce vol.
+            </div>
+            <div v-else>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Siège</th>
+                    <th>Nom</th>
+                    <th>Prénom</th>
+                    <th>Email de contact</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="passager in passagersVol" :key="passager._id">
+                    <td>
+                      <span class="badge bg-primary">{{ passager.numero_siege }}</span>
+                    </td>
+                    <td>{{ passager.nom }}</td>
+                    <td>{{ passager.prenom }}</td>
+                    <td>{{ passager.reservation_id?.email_contact }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -116,6 +173,8 @@ export default {
       aeroports: [],
       loading: true,
       showModal: false,
+      showEditModal: false,
+      showPassagersModal: false,
       nouveauVol: {
         numero_vol: '',
         aeroport_depart_id: '',
@@ -123,7 +182,21 @@ export default {
         avion_id: '',
         date_depart_utc: '',
         date_arrivee_utc: ''
-      }
+      },
+      volAModifier: null,
+      passagersVol: [],
+      volSelectionne: null
+    }
+  },
+  computed: {
+    volsAVenir() {
+      const maintenant = new Date()
+      return this.vols
+        .filter(vol => {
+          const dateDepart = new Date(vol.date_depart_utc)
+          return dateDepart >= maintenant || vol.statut === 'en_vol'
+        })
+        .sort((a, b) => new Date(a.date_depart_utc) - new Date(b.date_depart_utc))
     }
   },
   methods: {
@@ -143,20 +216,85 @@ export default {
         this.loading = false
       }
     },
+    async voirPassagers(vol) {
+      this.volSelectionne = vol
+      this.showPassagersModal = true
+      this.passagersVol = []
+      
+      try {
+        // Chercher toutes les réservations pour ce vol
+        const reservationsResponse = await api.get(`/reservations/vol/${vol._id}`)
+        const reservations = reservationsResponse.data
+
+        if (reservations.length === 0) {
+          return
+        }
+
+        // Récupérer tous les passagers de toutes les réservations
+        const passagersPromises = reservations.map(async reservation => {
+          try {
+            const response = await api.get(`/reservations/passagers/${reservation._id}`)
+            return response.data
+          } catch (err) {
+            return []
+          }
+        })
+
+        const passagersResponses = await Promise.all(passagersPromises)
+        
+        // Fusionner tous les passagers avec leurs informations de réservation
+        this.passagersVol = passagersResponses
+          .flatMap(response => response || [])
+          .map(passager => ({
+            ...passager,
+            reservation_id: reservations.find(r => r._id === passager.reservation_id)
+          }))
+          .sort((a, b) => (a.numero_siege || '').localeCompare(b.numero_siege || ''))
+
+      } catch (error) {
+        alert('Erreur lors du chargement des passagers')
+        this.showPassagersModal = false
+      }
+    },
+
+    fermerModal() {
+      this.showModal = false
+      this.showEditModal = false
+      this.volAModifier = null
+      this.nouveauVol = {
+        numero_vol: '',
+        aeroport_depart_id: '',
+        aeroport_arrivee_id: '',
+        avion_id: '',
+        date_depart_utc: '',
+        date_arrivee_utc: ''
+      }
+    },
+    modifierVol(vol) {
+      this.volAModifier = vol
+      this.nouveauVol = {
+        numero_vol: vol.numero_vol,
+        aeroport_depart_id: vol.aeroport_depart_id._id,
+        aeroport_arrivee_id: vol.aeroport_arrivee_id._id,
+        avion_id: vol.avion_id._id,
+        date_depart_utc: new Date(vol.date_depart_utc).toISOString().slice(0, 16),
+        date_arrivee_utc: new Date(vol.date_arrivee_utc).toISOString().slice(0, 16)
+      }
+      this.showEditModal = true
+    },
     async ajouterVol() {
       try {
-        await api.post('/vols', this.nouveauVol)
-        alert('Vol planifié')
-        this.showModal = false
-        this.chargerDonnees()
-        this.nouveauVol = {
-          numero_vol: '',
-          aeroport_depart_id: '',
-          aeroport_arrivee_id: '',
-          avion_id: '',
-          date_depart_utc: '',
-          date_arrivee_utc: ''
+        if (this.showEditModal) {
+          // Modification
+          await api.put(`/vols/${this.volAModifier._id}`, this.nouveauVol)
+          alert('Vol modifié')
+        } else {
+          // Création
+          await api.post('/vols', this.nouveauVol)
+          alert('Vol planifié')
         }
+        this.fermerModal()
+        this.chargerDonnees()
       } catch (error) {
         alert(error.response?.data?.message || 'Erreur')
       }

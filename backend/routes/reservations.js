@@ -4,6 +4,97 @@ const Reservation = require('../models/Reservation');
 const Passager = require('../models/Passager');
 const Vol = require('../models/Vol');
 const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
+const QRCode = require('qrcode');
+
+async function genererCarteEmbarquement(vol, passager, reservation) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Créer un nouveau document PDF
+      const doc = new PDFDocument({
+        size: [300, 500],
+        margins: {
+          top: 20,
+          bottom: 20,
+          left: 20,
+          right: 20
+        }
+      });
+
+      // Buffer pour stocker le PDF
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+
+      // Générer le QR code
+      const qrCodeData = await QRCode.toDataURL(JSON.stringify({
+        reservation: reservation.token,
+        passager: passager._id,
+        siege: passager.numero_siege
+      }));
+
+      // En-tête
+      doc.font('Helvetica-Bold')
+         .fontSize(16)
+         .text('FLYING WEB', { align: 'center' });
+
+      doc.moveDown()
+         .fontSize(14)
+         .text('Carte d\'embarquement', { align: 'center' });
+
+      // Informations du vol
+      doc.moveDown()
+         .fontSize(12)
+         .text(`Vol: ${vol.numero_vol}`, { align: 'left' })
+         .text(`De: ${vol.aeroport_depart_id.ville}`, { align: 'left' })
+         .text(`À: ${vol.aeroport_arrivee_id.ville}`, { align: 'left' })
+         .text(`Date: ${new Date(vol.date_depart_utc).toLocaleString('fr-FR')}`, { align: 'left' });
+
+      // Informations du passager
+      doc.moveDown()
+         .text(`Passager: ${passager.nom.toUpperCase()} ${passager.prenom}`, { align: 'left' })
+         .text(`Siège: ${passager.numero_siege}`, { align: 'left' });
+
+      // QR Code
+      doc.image(qrCodeData, 100, 300, { width: 100 });
+
+      // Instructions
+      doc.moveDown()
+         .fontSize(8)
+         .text('Veuillez présenter cette carte d\'embarquement avec une pièce d\'identité', 
+               { align: 'center' });
+
+      // Finaliser le document
+      doc.end();
+
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+// GET réservations par vol
+router.get('/vol/:volId', async (req, res) => {
+  try {
+    const reservations = await Reservation.find({ 
+      vol_id: req.params.volId,
+      statut: 'active'
+    });
+    res.json(reservations);
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
+
+// GET passagers par réservation
+router.get('/passagers/:reservationId', async (req, res) => {
+  try {
+    const passagers = await Passager.find({ reservation_id: req.params.reservationId });
+    res.json(passagers);
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+});
 const nodemailer = require('nodemailer');
 
 // Configure mail
@@ -55,7 +146,10 @@ router.post('/', async (req, res) => {
     const { vol_id, nombre_passagers, email_contact, passagers } = req.body;
     
     // Vérifier que le vol existe
-    const vol = await Vol.findById(vol_id).populate('avion_id');
+    const vol = await Vol.findById(vol_id)
+      .populate('avion_id')
+      .populate('aeroport_depart_id')
+      .populate('aeroport_arrivee_id');
     if (!vol) return res.status(404).json({ message: 'Vol non trouvé' });
     
     // Vérifier que le vol n'est pas annulé
@@ -70,12 +164,20 @@ router.post('/', async (req, res) => {
       placesReservees += res.nombre_passagers;
     }
     
-    if (placesReservees + nombre_passagers > vol.avion_id.nombre_places) {
+    const placesRestantes = vol.avion_id.nombre_places - placesReservees;
+    
+    if (nombre_passagers > placesRestantes) {
       return res.status(400).json({ 
-        message: 'Pas assez de places disponibles',
-        places_restantes: vol.avion_id.nombre_places - placesReservees
+        message: placesRestantes === 0 
+          ? 'Vol complet' 
+          : `Seulement ${placesRestantes} place(s) disponible(s)`,
+        places_restantes: placesRestantes
       });
     }
+    
+    // Mettre à jour le nombre de places disponibles dans le vol
+    vol.places_disponibles = placesRestantes - nombre_passagers;
+    await vol.save();
     
     // Générer un token
     const token = crypto.randomBytes(32).toString('hex');
@@ -88,6 +190,9 @@ router.post('/', async (req, res) => {
       email_contact
     });
     await reservation.save();
+    
+    // Mettre à jour le nombre de places disponibles
+    await vol.updatePlacesDisponibles();
     
     // Créer les passagers
     const passagersCreated = [];
@@ -107,19 +212,31 @@ router.post('/', async (req, res) => {
     const lienAcces = `${frontendUrl}/ma-reservation/${token}`;
 
     if (transporter) {
-      const mailOptions = {
-        from: process.env.MAIL_FROM || 'no-reply@flyingweb.com',
-        to: email_contact,
-        subject: `Votre réservation Flying Web - ${vol.numero_vol}`,
-        text: `Merci pour votre réservation. Consultez votre réservation ici: ${lienAcces}`,
-        html: `<p>Merci pour votre réservation.</p>
-               <p>Vous pouvez consulter, modifier ou annuler votre réservation en suivant ce lien :</p>
-               <p><a href="${lienAcces}">${lienAcces}</a></p>`
-      };
-
       try {
+        // Générer les cartes d'embarquement pour chaque passager
+        const cartesPromises = passagersCreated.map(passager =>
+          genererCarteEmbarquement(vol, passager, reservation)
+        );
+        const cartesPDF = await Promise.all(cartesPromises);
+
+        const mailOptions = {
+          from: process.env.MAIL_FROM || 'no-reply@flyingweb.com',
+          to: email_contact,
+          subject: `Votre réservation Flying Web - ${vol.numero_vol}`,
+          text: `Merci pour votre réservation. Consultez votre réservation ici: ${lienAcces}`,
+          html: `<p>Merci pour votre réservation.</p>
+                 <p>Vous pouvez consulter, modifier ou annuler votre réservation en suivant ce lien :</p>
+                 <p><a href="${lienAcces}">${lienAcces}</a></p>
+                 <p>Vous trouverez en pièces jointes ${passagersCreated.length > 1 ? 'les' : 'la'} carte${passagersCreated.length > 1 ? 's' : ''} d'embarquement pour ${passagersCreated.length > 1 ? 'chacun des' : 'le'} passager${passagersCreated.length > 1 ? 's' : ''} de cette réservation.</p>`,
+          attachments: passagersCreated.map((passager, index) => ({
+            filename: `carte-embarquement-${passager.nom.toLowerCase()}-${passager.prenom.toLowerCase()}.pdf`,
+            content: cartesPDF[index],
+            contentType: 'application/pdf'
+          }))
+        };
+
         const info = await transporter.sendMail(mailOptions);
-        console.log('Email de réservation envoyé:', info.messageId);
+        console.log('Email de réservation envoyé avec cartes d\'embarquement:', info.messageId);
       } catch (err) {
         console.error('Erreur envoi email réservation:', err && err.message ? err.message : err);
       }
@@ -171,6 +288,10 @@ router.delete('/token/:token', async (req, res) => {
     
     reservation.statut = 'annulee';
     await reservation.save();
+    
+    // Mettre à jour le nombre de places disponibles
+    await Vol.findById(reservation.vol_id).then(vol => vol.updatePlacesDisponibles());
+    
     res.json({ message: 'Réservation annulée' });
   } catch (error) {
     res.status(500).json({ message: 'Erreur d\'annulation', error: error.message });

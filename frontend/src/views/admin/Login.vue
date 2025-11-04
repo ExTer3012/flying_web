@@ -58,7 +58,13 @@ export default {
       try {
         const response = await api.post('/auth/login', this.credentials)
         localStorage.setItem('token', response.data.token)
-        this.$router.push('/admin/dashboard')
+        
+        // Récupérer la route demandée initialement (si elle existe)
+        const redirectPath = localStorage.getItem('redirectAfterLogin')
+        localStorage.removeItem('redirectAfterLogin') // Nettoyer après usage
+        
+        // Rediriger vers la page demandée ou le dashboard par défaut
+        this.$router.push(redirectPath || '/admin/dashboard')
       } catch (error) {
         this.error = error.response?.data?.message || 'Erreur de connexion'
       } finally {
